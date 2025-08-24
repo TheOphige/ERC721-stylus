@@ -1,111 +1,64 @@
-//!
-//! Stylus Hello World
-//!
-//! The following contract implements the Counter example from Foundry.
-//!
-//! ```solidity
-//! contract Counter {
-//!     uint256 public number;
-//!     function setNumber(uint256 newNumber) public {
-//!         number = newNumber;
-//!     }
-//!     function increment() public {
-//!         number++;
-//!     }
-//! }
-//! ```
-//!
-//! The program is ABI-equivalent with Solidity, which means you can call it from both Solidity and Rust.
-//! To do this, run `cargo stylus export-abi`.
-//!
-//! Note: this code is a template-only and has not been audited.
-//!
-// Allow `cargo stylus export-abi` to generate a main function.
-#![cfg_attr(not(any(test, feature = "export-abi")), no_main)]
-#![cfg_attr(not(any(test, feature = "export-abi")), no_std)]
-
-#[macro_use]
+// Only run this as a WASM if the export-abi feature is not set.
+#![cfg_attr(not(any(feature = "export-abi", test)), no_main)]
 extern crate alloc;
 
-use alloc::vec::Vec;
+// Modules and imports
+mod erc721;
 
-/// Import items from the SDK. The prelude contains common traits and macros.
-use stylus_sdk::{alloy_primitives::U256, prelude::*};
+use alloy_primitives::{U256, Address};
+/// Import the Stylus SDK along with alloy primitive types for use in our program.
+use stylus_sdk::{
+    msg, prelude::*
+};
+use crate::erc721::{Erc721, Erc721Params, Erc721Error};
 
-// Define some persistent storage using the Solidity ABI.
-// `Counter` will be the entrypoint.
+/// Immutable definitions
+struct StylusNFTParams;
+impl Erc721Params for StylusNFTParams {
+    const NAME: &'static str = "StylusNFT";
+    const SYMBOL: &'static str = "SNFT";
+
+    fn token_uri(token_id: U256) -> String {
+        format!("{}{}{}", "https://my-nft-metadata.com/", token_id, ".json")
+    }
+}
+
+// Define the entrypoint as a Solidity storage object. The sol_storage! macro
+// will generate Rust-equivalent structs with all fields mapped to Solidity-equivalent
+// storage slots and types.
 sol_storage! {
     #[entrypoint]
-    pub struct Counter {
-        uint256 number;
+    struct StylusNFT {
+        #[borrow] // Allows erc721 to access StylusNFT's storage and make calls
+        Erc721<StylusNFTParams> erc721;
     }
 }
 
-/// Declare that `Counter` is a contract with the following external methods.
 #[public]
-impl Counter {
-    /// Gets the number from storage.
-    pub fn number(&self) -> U256 {
-        self.number.get()
+#[inherit(Erc721<StylusNFTParams>)]
+impl StylusNFT {
+    /// Mints an NFT
+    pub fn mint(&mut self) -> Result<(), Erc721Error> {
+        let minter = msg::sender();
+        self.erc721.mint(minter)?;
+        Ok(())
     }
 
-    /// Sets a number in storage to a user-specified value.
-    pub fn set_number(&mut self, new_number: U256) {
-        self.number.set(new_number);
+    /// Mints an NFT to another address
+    pub fn mint_to(&mut self, to: Address) -> Result<(), Erc721Error> {
+        self.erc721.mint(to)?;
+        Ok(())
     }
 
-    /// Sets a number in storage to a user-specified value.
-    pub fn mul_number(&mut self, new_number: U256) {
-        self.number.set(new_number * self.number.get());
+    /// Burns an NFT
+    pub fn burn(&mut self, token_id: U256) -> Result<(), Erc721Error> {
+        // This function checks that msg::sender() owns the specified token_id
+        self.erc721.burn(msg::sender(), token_id)?;
+        Ok(())
     }
 
-    /// Sets a number in storage to a user-specified value.
-    pub fn add_number(&mut self, new_number: U256) {
-        self.number.set(new_number + self.number.get());
-    }
-
-    /// Increments `number` and updates its value in storage.
-    pub fn increment(&mut self) {
-        let number = self.number.get();
-        self.set_number(number + U256::from(1));
-    }
-
-    /// Adds the wei value from msg_value to the number in storage.
-    #[payable]
-    pub fn add_from_msg_value(&mut self) {
-        let number = self.number.get();
-        self.set_number(number + self.vm().msg_value());
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_counter() {
-        use stylus_sdk::testing::*;
-        let vm = TestVM::default();
-        let mut contract = Counter::from(&vm);
-
-        assert_eq!(U256::ZERO, contract.number());
-
-        contract.increment();
-        assert_eq!(U256::from(1), contract.number());
-
-        contract.add_number(U256::from(3));
-        assert_eq!(U256::from(4), contract.number());
-
-        contract.mul_number(U256::from(2));
-        assert_eq!(U256::from(8), contract.number());
-
-        contract.set_number(U256::from(100));
-        assert_eq!(U256::from(100), contract.number());
-
-        // Override the msg value for future contract method invocations.
-        vm.set_value(U256::from(2));
-
-        contract.add_from_msg_value();
-        assert_eq!(U256::from(102), contract.number());
+    /// Total supply
+    pub fn total_supply(&mut self) -> Result<U256, Erc721Error> {
+        Ok(self.erc721.total_supply.get())
     }
 }
